@@ -1858,8 +1858,14 @@ public class NativeProtocol extends AbstractProtocol<NativePacketPayload> implem
     }
 
     private BufferedInputStream getFileStream(String fileName) throws IOException {
-        // Only allow in memory streams for security reasons
+        // Only allow in memory streams for security reasons. Never open a
+        // server-named file: a malicious MySQL server could otherwise respond
+        // to any query with a LOAD DATA LOCAL INFILE request for an arbitrary
+        // path (e.g. /proc/self/environ) and read files off this client.
         InputStream hookedStream = getLocalInfileInputStream();
+        if (hookedStream == null) {
+            throw new IOException("LOAD DATA LOCAL INFILE requested but no client input stream is set; refusing to read local files.");
+        }
         return new BufferedInputStream(hookedStream);
     }
 

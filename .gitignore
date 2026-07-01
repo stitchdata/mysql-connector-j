@@ -18,3 +18,8 @@
 .attach_pid*
 hs_err_pid*.log
 *.sh
+
+# Stitch security-fork tooling (see stitch/README.md): keep the scripts tracked
+# despite the global *.sh ignore, but ignore built artifacts.
+!stitch/*.sh
+/stitch/target/

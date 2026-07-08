@@ -56,10 +56,15 @@ echo ">> Building com.mysql:mysql-connector-j:${OUT_VERSION} (base ${BASE_VERSIO
 for f in "${PATCHED_JAVA}" "${PATCHED_PROPS}"; do
   [[ -f "${f}" ]] || { echo "ERROR: missing ${f}" >&2; exit 1; }
 done
-grep -q "LoadDataLocalInfileNoStream" "${PATCHED_JAVA}" \
-  || { echo "ERROR: getFileStream fix not found in NativeProtocol.java" >&2; exit 1; }
-grep -q "^MysqlIO.LoadDataLocalInfileNoStream=" "${PATCHED_PROPS}" \
-  || { echo "ERROR: message key missing from LocalizedErrorMessages.properties" >&2; exit 1; }
+# Security invariants of the fix (independent of which exception style is used):
+#   1. getFileStream must feed the in-memory hooked stream...
+grep -q "getLocalInfileInputStream" "${PATCHED_JAVA}" \
+  || { echo "ERROR: getFileStream fix not found in NativeProtocol.java (no getLocalInfileInputStream call)" >&2; exit 1; }
+#   2. ...and must never open a server-named file.
+if grep -q "new FileInputStream" "${PATCHED_JAVA}"; then
+  echo "ERROR: NativeProtocol.java still constructs a FileInputStream (file-read vector present)" >&2
+  exit 1
+fi
 
 # --- 1. Download upstream base jar + pom ------------------------------------
 BASE_JAR="${WORK}/base.jar"
@@ -81,11 +86,9 @@ cp "${BASE_JAR}" "${OUT_JAR}"
 ( cd "${CLASSES}" && jar uf "${OUT_JAR}" com/mysql/cj/protocol/a/NativeProtocol*.class )
 ( cd "${FORK_ROOT}/src/main/resources" && jar uf "${OUT_JAR}" com/mysql/cj/LocalizedErrorMessages.properties )
 
-# --- 4. Verify the fix made it in (extract to files: `grep -q` on a pipe
-#        under `set -o pipefail` fails via SIGPIPE) -------------------------
-unzip -p "${OUT_JAR}" com/mysql/cj/LocalizedErrorMessages.properties > "${WORK}/props.out"
-grep -q "LoadDataLocalInfileNoStream" "${WORK}/props.out" \
-  || { echo "ERROR: message key not present in assembled jar" >&2; exit 1; }
+# --- 4. Verify the compiled fix is safe: the assembled NativeProtocol must
+#        carry no FileInputStream reference (the file-read vector). grep -q on a
+#        pipe under `set -o pipefail` fails via SIGPIPE, so extract to a file. --
 javap -p -c -classpath "${OUT_JAR}" com.mysql.cj.protocol.a.NativeProtocol > "${WORK}/nativeprotocol.txt"
 if grep -q "FileInputStream" "${WORK}/nativeprotocol.txt"; then
   echo "ERROR: assembled NativeProtocol still references FileInputStream" >&2

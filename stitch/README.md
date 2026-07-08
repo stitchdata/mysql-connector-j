@@ -70,11 +70,15 @@ stitch/deploy-jar.sh     # builds, then `lein deploy` to the private repo
 ```
 
 This publishes to `s3p://com-stitchdata-prod-maven-repository/releases` using
-`s3-wagon-private` with `:no-auth true` (ambient AWS SSO creds), matching how
-our other services resolve/publish artifacts. Set `REPO=snapshots` to push to
-the snapshots repo instead. The deploy uses the minimal `stitch/project.clj`
-helper and `lein deploy` with explicit coordinates, so no source is rebuilt by
-lein.
+`s3-wagon-private` with `:no-auth true`. Because that wagon uses the AWS Java
+SDK v1 (which cannot read the SSO token cache), `deploy-jar.sh` first exports
+your active profile's temporary SSO credentials into `AWS_ACCESS_KEY_ID` /
+`AWS_SECRET_ACCESS_KEY` / `AWS_SESSION_TOKEN` (via
+`aws configure export-credentials`). Env-var credentials take precedence over
+the SDK's credentials-file lookup, so a stale static `[default]` key in
+`~/.aws/credentials` won't shadow your SSO session. Set `AWS_PROFILE` if your
+deploy role lives in a non-default profile. Set `REPO=snapshots` to push to the
+snapshots repo instead.
 
 ## Consuming it
 

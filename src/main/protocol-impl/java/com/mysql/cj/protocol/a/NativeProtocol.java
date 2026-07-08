@@ -1864,7 +1864,7 @@ public class NativeProtocol extends AbstractProtocol<NativePacketPayload> implem
         // path (e.g. /proc/self/environ) and read files off this client.
         InputStream hookedStream = getLocalInfileInputStream();
         if (hookedStream == null) {
-            throw new IOException("LOAD DATA LOCAL INFILE requested but no client input stream is set; refusing to read local files.");
+            throw ExceptionFactory.createException(Messages.getString("MysqlIO.LoadDataLocalInfileNoStream"), this.exceptionInterceptor);
         }
         return new BufferedInputStream(hookedStream);
     }

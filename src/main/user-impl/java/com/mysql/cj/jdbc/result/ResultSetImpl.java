@@ -29,11 +29,8 @@
 
 package com.mysql.cj.jdbc.result;
 
-import java.io.ByteArrayInputStream;
-import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
-import java.io.ObjectInputStream;
 import java.io.Reader;
 import java.io.UnsupportedEncodingException;
 import java.math.BigDecimal;
@@ -1131,30 +1128,18 @@ public class ResultSetImpl extends NativeResultset implements ResultSetInternalM
                 if (field.isBinary() || field.isBlob()) {
                     byte[] data = getBytes(columnIndex);
 
-                    if (this.connection.getPropertySet().getBooleanProperty(PropertyKey.autoDeserialize).getValue()) {
-                        Object obj = data;
-
-                        if ((data != null) && (data.length >= 2)) {
-                            if ((data[0] == -84) && (data[1] == -19)) {
-                                // Serialized object?
-                                try {
-                                    ByteArrayInputStream bytesIn = new ByteArrayInputStream(data);
-                                    ObjectInputStream objIn = new ObjectInputStream(bytesIn);
-                                    obj = objIn.readObject();
-                                    objIn.close();
-                                    bytesIn.close();
-                                } catch (ClassNotFoundException cnfe) {
-                                    throw SQLError.createSQLException(Messages.getString("ResultSet.Class_not_found___91") + cnfe.toString()
-                                            + Messages.getString("ResultSet._while_reading_serialized_object_92"), getExceptionInterceptor());
-                                } catch (IOException ex) {
-                                    obj = data; // not serialized?
-                                }
-                            } else {
-                                return getString(columnIndex);
-                            }
-                        }
-
-                        return obj;
+                    // SECURITY (SAC-31683): never deserialize BLOB/binary contents. A malicious
+                    // MySQL server can return an attacker-controlled Java serialization stream in a
+                    // BLOB which a Java object-input stream would turn into remote code execution
+                    // (CWE-502). The autoDeserialize property is neutralized here: binary values are
+                    // always returned as raw bytes. If a serialized object stream is detected while
+                    // autoDeserialize is (e.g. via JDBC URL injection) enabled, refuse explicitly
+                    // rather than deserialize. See upstream removal in Connector/J 8.2.0.
+                    if (this.connection.getPropertySet().getBooleanProperty(PropertyKey.autoDeserialize).getValue()
+                            && (data != null) && (data.length >= 2) && (data[0] == -84) && (data[1] == -19)) {
+                        throw SQLError.createSQLException(
+                                "Refusing to deserialize object stream from BLOB value; autoDeserialize is disabled for security.",
+                                getExceptionInterceptor());
                     }
 
                     return data;
@@ -1235,30 +1220,13 @@ public class ResultSetImpl extends NativeResultset implements ResultSetInternalM
                 if (field.isBinary() || field.isBlob()) {
                     byte[] data = getBytes(columnIndex);
 
-                    if (this.connection.getPropertySet().getBooleanProperty(PropertyKey.autoDeserialize).getValue()) {
-                        Object obj = data;
-
-                        if ((data != null) && (data.length >= 2)) {
-                            if ((data[0] == -84) && (data[1] == -19)) {
-                                // Serialized object?
-                                try {
-                                    ByteArrayInputStream bytesIn = new ByteArrayInputStream(data);
-                                    ObjectInputStream objIn = new ObjectInputStream(bytesIn);
-                                    obj = objIn.readObject();
-                                    objIn.close();
-                                    bytesIn.close();
-                                } catch (ClassNotFoundException cnfe) {
-                                    throw SQLError.createSQLException(Messages.getString("ResultSet.Class_not_found___91") + cnfe.toString()
-                                            + Messages.getString("ResultSet._while_reading_serialized_object_92"), getExceptionInterceptor());
-                                } catch (IOException ex) {
-                                    obj = data; // not serialized?
-                                }
-                            } else {
-                                return getString(columnIndex);
-                            }
-                        }
-
-                        return obj;
+                    // SECURITY (SAC-31683): never deserialize BLOB/binary contents. See the BIT
+                    // case above and Connector/J 8.2.0 for the upstream removal of this sink.
+                    if (this.connection.getPropertySet().getBooleanProperty(PropertyKey.autoDeserialize).getValue()
+                            && (data != null) && (data.length >= 2) && (data[0] == -84) && (data[1] == -19)) {
+                        throw SQLError.createSQLException(
+                                "Refusing to deserialize object stream from BLOB value; autoDeserialize is disabled for security.",
+                                getExceptionInterceptor());
                     }
 
                     return data;

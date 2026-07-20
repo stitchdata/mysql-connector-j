@@ -5,7 +5,7 @@
 # Build the Stitch security-patched Connector/J jar and publish it to our
 # private maven repo so services (e.g. loader-mysql) can depend on
 #
-#     com.mysql/mysql-connector-j "8.0.33-stitch-1"
+#     com.mysql/mysql-connector-j "8.0.33-stitch-2"
 #
 # like any other internal artifact.
 #
@@ -21,7 +21,7 @@
 #
 set -euo pipefail
 
-OUT_VERSION="${OUT_VERSION:-8.0.33-stitch-1}"
+OUT_VERSION="${OUT_VERSION:-8.0.33-stitch-2}"
 REPO="${REPO:-releases}"          # "releases" or "snapshots"
 GROUP_ARTIFACT="com.mysql/mysql-connector-j"
 

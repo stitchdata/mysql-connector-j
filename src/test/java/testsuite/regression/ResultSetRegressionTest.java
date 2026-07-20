@@ -3028,10 +3028,13 @@ public class ResultSetRegressionTest extends BaseTestCase {
 
     /**
      * Tests fix for BUG#25787 - java.util.Date should be serialized for PreparedStatement.setObject().
-     * 
-     * We add a new configuration option "treatUtilDateAsTimestamp", which is false by default, as (1) We already had specific behavior to treat
-     * java.util.Date as a java.sql.Timestamp because it's useful to many folks, and (2) that behavior will very likely be in JDBC-post-4.0 as a requirement.
-     * 
+     *
+     * SECURITY (SAC-31683): the auto-deserialization of BLOB values on read has been removed because
+     * a malicious MySQL server can return an attacker-controlled Java serialization stream that
+     * ObjectInputStream.readObject() would turn into remote code execution (CWE-502). This test now
+     * asserts that, even with autoDeserialize=true, reading a serialized BLOB no longer instantiates
+     * the object graph: the driver refuses with an explicit SQLException instead of deserializing.
+     *
      * @throws Exception
      */
     @Test
@@ -3056,8 +3059,53 @@ public class ResultSetRegressionTest extends BaseTestCase {
 
         this.rs = deserializeConn.createStatement().executeQuery("SELECT MY_OBJECT_FIELD FROM testBug25787");
         this.rs.next();
-        assertEquals("java.util.Date", this.rs.getObject(1).getClass().getName());
-        assertEquals(dt, this.rs.getObject(1));
+        // Previously returned a deserialized java.util.Date; the deserialization sink has been removed
+        // for security, so the driver must now refuse rather than call readObject().
+        assertThrows(SQLException.class, "Refusing to deserialize object stream from BLOB value.*", () -> {
+            return ResultSetRegressionTest.this.rs.getObject(1);
+        });
+    }
+
+    /**
+     * Regression test for SAC-31683: a MySQL server that returns a Java serialization stream (magic
+     * bytes 0xAC 0xED) in a BLOB must NOT be deserialized by the driver, even when autoDeserialize is
+     * enabled (e.g. via JDBC URL property injection). Asserts no object is instantiated and the driver
+     * refuses explicitly, closing the CWE-502 remote-code-execution sink.
+     *
+     * @throws Exception
+     */
+    @Test
+    public void testBugSAC31683NoBlobDeserialization() throws Exception {
+        createTable("testBugSAC31683", "(payload BLOB)");
+
+        Properties props = new Properties();
+        props.setProperty(PropertyKey.sslMode.getKeyName(), SslMode.DISABLED.name());
+        props.setProperty(PropertyKey.allowPublicKeyRetrieval.getKeyName(), "true");
+        props.setProperty(PropertyKey.autoDeserialize.getKeyName(), "true");
+
+        // A minimal, well-formed Java serialization stream (serialized empty String) begins 0xAC 0xED.
+        java.io.ByteArrayOutputStream bytesOut = new java.io.ByteArrayOutputStream();
+        java.io.ObjectOutputStream objOut = new java.io.ObjectOutputStream(bytesOut);
+        objOut.writeObject("SAC-31683");
+        objOut.close();
+        byte[] serialized = bytesOut.toByteArray();
+        assertEquals((byte) 0xAC, serialized[0]);
+        assertEquals((byte) 0xED, serialized[1]);
+
+        try (Connection deserializeConn = getConnectionWithProps(props)) {
+            this.pstmt = deserializeConn.prepareStatement("INSERT INTO testBugSAC31683 (payload) VALUES (?)");
+            this.pstmt.setBytes(1, serialized);
+            this.pstmt.execute();
+
+            this.rs = deserializeConn.createStatement().executeQuery("SELECT payload FROM testBugSAC31683");
+            this.rs.next();
+            // Must refuse rather than deserialize (no readObject / RCE).
+            assertThrows(SQLException.class, "Refusing to deserialize object stream from BLOB value.*", () -> {
+                return ResultSetRegressionTest.this.rs.getObject(1);
+            });
+            // Raw bytes remain retrievable safely.
+            assertNotNull(this.rs.getBytes(1));
+        }
     }
 
     @Test
